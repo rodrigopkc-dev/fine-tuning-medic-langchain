@@ -123,7 +123,7 @@ def no_enriquecimento_wiki(state: MedicalState):
         return {"dados_wiki": "[Wikipedia]: Informação não encontrada."}
 
 def no_busca_protocolos(state: MedicalState):
-    log_evento("WEB", "Buscando protocolos 2026 via DuckDuckGo (Índice Bing).")
+    log_evento("WEB", "Buscando protocolos 2026 via Web (Índice Bing).")
     try:
         res = search_online.run(f"Protocolos clínicos médicos 2026 para {state['sintomas']}")
         return {"dados_web": f"[DuckDuckGo Search / Bing]: {res}"}
@@ -146,7 +146,7 @@ def no_formatador_final(state: MedicalState):
     - Para cada afirmação técnica, indique a fonte entre parênteses.
     - Se usar o Conhecimento Base, cite: (Fonte: Ollama Local)
     - Se usar a Fundamentação Científica, cite: (Fonte: Wikipedia)
-    - Se usar a Atualização 2026, cite: (Fonte: DuckDuckGo Search / Bing)
+    - Se usar a Atualização 2026, cite: (Fonte: Web Search / Bing)
     
     ESTRUTURA DO PARECER:
     - Hipóteses Diagnósticas
@@ -224,7 +224,7 @@ def main():
         os.system('cls' if os.name == 'nt' else 'clear')
         print("="*80)
         print("      ASSISTENTE MÉDICO - EXPLAINABLE AI (XAI) & AUDITORIA")
-        print("      Fluxo: IA Local -> Wiki -> DuckDuckGo -> Relatório")
+        print("      Fluxo: IA Local -> Wiki -> Web -> Relatório")
         print("="*80)
 
         perfil = input("\nPerfil do Paciente (ou 'sair'): ")
