@@ -17,6 +17,8 @@ import os
 import gc
 import logging
 from typing import TypedDict
+
+from ollama import Client
 from langgraph.graph import StateGraph, END
 
 # Componentes do LangChain
@@ -44,7 +46,9 @@ def log_evento(node, mensagem, level="info"):
         logger.info(msg_formatada)
 
 # --- 2. CONFIGURAÇÃO GLOBAL E ESTADO ---
-AVISO_LEGAL = "ESTE RELATÓRIO É UMA MINUTA DE APOIO E NÃO SUBSTITUI A PRESCRIÇÃO E VALIDAÇÃO HUMANA."
+AVISO_LEGAL = "ESTE RELATORIO E UMA MINUTA DE APOIO E NAO SUBSTITUI A PRESCRICAO E VALIDACAO HUMANA."
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-7b-local")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 
 class MedicalState(TypedDict):
     perfil: str
@@ -56,10 +60,46 @@ class MedicalState(TypedDict):
 
 # Inicialização das ferramentas
 # Temperatura 0.0 para garantir previsibilidade médica
-llm = ChatOllama(model='qwen2.5-7b-local', temperature=0.0, num_predict=500) 
+llm = ChatOllama(
+    model=OLLAMA_MODEL,
+    base_url=OLLAMA_HOST,
+    temperature=0.0,
+    num_predict=500,
+)
 search_online = DuckDuckGoSearchRun()
 wiki_api = WikipediaAPIWrapper(top_k_results=1, doc_content_chars_max=1500)
 search_wiki = WikipediaQueryRun(api_wrapper=wiki_api)
+
+
+def verificar_ollama():
+    """Valida se o servidor Ollama esta ativo e se o modelo esperado existe."""
+    try:
+        client = Client(host=OLLAMA_HOST)
+        response = client.list()
+        models = []
+
+        for item in getattr(response, "models", []):
+            model_name = getattr(item, "model", None) or getattr(item, "name", None)
+            if model_name:
+                models.append(model_name)
+
+        normalized_target = OLLAMA_MODEL.split(":", 1)[0]
+        normalized_models = {name.split(":", 1)[0] for name in models}
+
+        if OLLAMA_MODEL in models or normalized_target in normalized_models:
+            return True, None
+
+        disponiveis = ", ".join(models) if models else "nenhum modelo encontrado"
+        return (
+            False,
+            f"Modelo '{OLLAMA_MODEL}' nao encontrado no Ollama. Modelos disponiveis: {disponiveis}.",
+        )
+    except Exception as exc:
+        return (
+            False,
+            f"Nao foi possivel conectar ao Ollama em {OLLAMA_HOST}. "
+            f"Inicie o servico e carregue o modelo '{OLLAMA_MODEL}'. Detalhe: {exc}",
+        )
 
 # --- 3. DEFINIÇÃO DOS NÓS DO GRAFO (NODES) ---
 
@@ -141,6 +181,44 @@ def liberar_memoria():
     gc.collect()
     log_evento("SISTEMA", "Limpeza de memória executada com sucesso.")
 
+def executar_consulta(perfil: str, sintomas: str):
+    """Executa o fluxo clínico completo e retorna os dados para CLI ou UI."""
+    perfil = perfil.strip()
+    sintomas = sintomas.strip()
+
+    if not perfil:
+        raise ValueError("Informe o perfil do paciente.")
+
+    if not sintomas:
+        raise ValueError("Informe os sintomas observados.")
+
+    log_evento("USUÁRIO", f"Início de consulta: {perfil} | Sintomas: {sintomas}")
+    ollama_ok, ollama_msg = verificar_ollama()
+
+    if not ollama_ok:
+        log_evento("OLLAMA", ollama_msg, "error")
+        raise RuntimeError(ollama_msg)
+
+    try:
+        resultado = graph.invoke({"perfil": perfil, "sintomas": sintomas})
+        log_evento("SISTEMA", "Relatório final gerado e exibido.")
+        return {
+            "perfil": perfil,
+            "sintomas": sintomas,
+            "parecer_final": resultado["parecer_final"],
+            "analise_ollama": resultado.get("analise_ollama", ""),
+            "dados_wiki": resultado.get("dados_wiki", ""),
+            "dados_web": resultado.get("dados_web", ""),
+            "aviso_legal": AVISO_LEGAL,
+            "ollama_model": OLLAMA_MODEL,
+            "ollama_host": OLLAMA_HOST,
+        }
+    except Exception as e:
+        log_evento("GRAFO", f"Erro crítico na execução: {str(e)}", "error")
+        raise
+    finally:
+        liberar_memoria()
+
 def main():
     while True:
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -155,31 +233,18 @@ def main():
         sintomas = input("Sintomas Observados: ")
         if sintomas.lower() == 'sair': break
 
-        log_evento("USUÁRIO", f"Início de consulta: {perfil} | Sintomas: {sintomas}")
-
         try:
-            # Execução do Grafo
-            inputs = {"perfil": perfil, "sintomas": sintomas}
-            resultado = graph.invoke(inputs)
-            
+            resultado = executar_consulta(perfil, sintomas)
+
             # Exibição do Parecer
-            print("\n" + "█"*25 + " PARECER TÉCNICO SUGERIDO " + "█"*25)
+            print("\n" + "="*25 + " PARECER TECNICO SUGERIDO " + "="*25)
             print(resultado["parecer_final"])
             print("-" * 80)
-            print(f"\033[91m⚠️  {AVISO_LEGAL}\033[0m")
-            print("█"*80 + "\n")
-            
-            log_evento("SISTEMA", "Relatório final gerado e exibido.")
-
-            # Limpeza Pós-Consulta
-            del resultado
-            del inputs
-            liberar_memoria()
+            print(f"AVISO: {AVISO_LEGAL}")
+            print("="*80 + "\n")
 
         except Exception as e:
-            log_evento("GRAFO", f"Erro crítico na execução: {str(e)}", "error")
-            print(f"\n❌ Ocorreu um erro: {e}")
-            liberar_memoria()
+            print(f"\nERRO: {e}")
 
         input("\n[Pressione ENTER para nova consulta]")
 
